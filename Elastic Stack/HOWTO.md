@@ -1,4 +1,4 @@
-# Návod ke zprovoznění 2. části semestrální práce
+# Návod ke zprovoznění
 
 Spuštění ELK stack.
 .../2 - Elastic Stack >
