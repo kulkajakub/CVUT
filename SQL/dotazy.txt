@@ -1,0 +1,259 @@
+-- Vybavenie lomu Puf.
+
+SELECT typ_vybavenie
+FROM LOM NATURAL JOIN VYBAVENIE
+WHERE meno_lom = 'Puf';
+
+-- Mena soferov ktory, riadia vozidla ktore nepresahuju nosnost 5 ton.
+
+SELECT meno_zam
+FROM (SELECT id_zam
+    FROM VOZIDLO
+    WHERE nosnost < 5)
+JOIN ZAMESTNANEC USING (id_zam);
+
+-- Odberatelia ktorý si objednali iba strk 0/4.
+
+SELECT meno_odb, adresa_odb, kontakt_odb
+FROM ((SELECT id_odb
+    FROM OBJEDNAVKA
+    WHERE material_obj = 'strk 0/4')
+MINUS
+    (SELECT id_odb
+    FROM OBJEDNAVKA
+    WHERE material_obj <> 'strk 0/4'))
+JOIN ODBERATEL USING (id_odb);
+
+-- Ktorý lom vlastní každý typ vybavenia.
+
+WITH 
+R1 AS (SELECT DISTINCT(meno_lom) FROM VYBAVENIE),
+R2 AS (SELECT DISTINCT (typ_vybavenie) FROM VYBAVENIE),
+R AS (SELECT * FROM R1 CROSS JOIN R2),
+S AS (SELECT * FROM R MINUS SELECT meno_lom, typ_vybavenie FROM VYBAVENIE),
+T AS (SELECT DISTINCT(meno_lom) FROM S)
+
+(SELECT DISTINCT meno_lom FROM VYBAVENIE)
+MINUS
+(SELECT * FROM T);
+
+-- Ak je naozaj každý typ vybavenia umiestnený v lome Muf, potom ak odčítam vybavenie v lome Muf od ostatných, musí mi výjsť prázdna množina.
+
+WITH 
+R1 AS (SELECT DISTINCT(meno_lom) FROM VYBAVENIE),
+R2 AS (SELECT DISTINCT (typ_vybavenie) FROM VYBAVENIE),
+R AS (SELECT * FROM R1 CROSS JOIN R2),
+S AS (SELECT * FROM R MINUS SELECT meno_lom, typ_vybavenie FROM VYBAVENIE),
+T AS (SELECT DISTINCT(meno_lom) FROM S),
+U AS (SELECT DISTINCT meno_lom FROM VYBAVENIE MINUS SELECT * FROM T),
+V AS (SELECT DISTINCT(typ_vybavenie) FROM U join VYBAVENIE USING (meno_lom))
+
+SELECT typ_vybavenie FROM VYBAVENIE 
+MINUS
+SELECT * FROM V;
+
+-- Odberateľia ktorý si v jednej objednávke objednali viac ako 15 ton materiálu.
+
+SELECT DISTINCT meno_odb, adresa_odb, kontakt_odb
+FROM OBJEDNAVKA 
+    JOIN ODBERATEL ON OBJEDNAVKA.id_odb = ODBERATEL.id_odb
+WHERE hmotnost_obj > 15;
+
+-- Mená pracovníkov ktorý pracovali cezčas.
+
+SELECT DISTINCT meno_zam, adresa_zam, kontakt_zam
+FROM ZAMESTNANEC
+    JOIN SICHTA USING (id_zam)
+WHERE (cas_sichta > 0);
+
+-- Chceme vymeniť jedného vodiča z lomu za šoferá dodávok. Aké máme možnosti?
+
+SELECT R1.meno_zam, R2.meno_zam
+FROM (SELECT DISTINCT meno_zam
+    FROM ZAMESTNANEC JOIN PRACOVNIK USING (id_zam)
+    WHERE (pozicia = 'vodic')) R1
+CROSS JOIN
+    (SELECT DISTINCT meno_zam
+    FROM ZAMESTNANEC JOIN SOFER ON (ZAMESTNANEC.id_zam = SOFER.id_zam)) R2;
+	
+-- Objednávky ktoré ešte neboli vydané.
+
+SELECT id_odb, id_obj, datum_obj, adresa_obj, material_obj, hmotnost_obj
+FROM OBJEDNAVKA
+ LEFT JOIN VYDAJ USING (id_obj)
+WHERE id_vydaj is null
+ORDER BY datum_obj, id_obj;
+
+-- Zoznam všetkých výdajov a ich detailoch.
+
+SELECT id_obj, id_vydaj, datum, material, hmotnost_vydaj, adresa_obj, novy_zostatok_obj, meno_odb, adresa_odb, kontakt_odb
+FROM VYDAJ
+    full join OBJEDNAVKA using (id_obj)
+    full join ODBERATEL using (id_odb)
+order by id_vydaj;
+
+-- Ktoré vozidla sú riadené soférmi so skupinou vodičkého preukazu C1?
+
+SELECT spz
+FROM VOZIDLO
+WHERE id_zam IN (SELECT id_zam FROM SOFER WHERE skupina_vodickeho_preukazu = 'C1');
+
+-- Koľko jázd vykonali a akú vzdialenosť prešli šoféri?
+
+SELECT meno_zam, count(id_vydaj) AS jazdy_tyzden, SUM(vzdialenost) AS vzdialenost_tyzden
+FROM (SELECT id_zam, vzdialenost, id_vydaj
+      FROM DODANIE
+        JOIN VOZIDLO USING (spz))
+    JOIN ZAMESTNANEC USING (id_zam)
+GROUP BY meno_zam;
+
+-- Vypis najvzdialenejšie dodávky a počet ich dodávok.
+
+SELECT DISTINCT(id_obj), 
+        (SELECT vzdialenost FROM VYDAJ WHERE DODANIE.id_vydaj = VYDAJ.id_vydaj) AS VZDIALENOST, 
+        (SELECT count(id_vydaj) FROM VYDAJ WHERE DODANIE.id_obj = VYDAJ.id_obj) AS POCET_VYJAZDOV
+FROM DODANIE
+order by (2) DESC;
+
+-- Odberatelia ktorý si v poslednom týždni nič neobjednali.
+
+SELECT meno_odb, adresa_odb, kontakt_odb
+FROM ODBERATEL
+WHERE NOT EXISTS (SELECT id_obj FROM OBJEDNAVKA WHERE OBJEDNAVKA.id_odb = ODBERATEL.id_odb);
+
+-- Ktoré práce potrebovali viac alebo menej času na dokončenie.
+
+(SELECT id_praca, datum, meno_lom, material, hmotnost_praca, cas_tazba AS cas 
+FROM PRACA
+WHERE cas_tazba is not null)
+UNION
+(SELECT id_praca, datum, meno_lom, material, hmotnost_praca, cas_spracovanie AS cas 
+FROM PRACA
+WHERE cas_spracovanie is not null)
+ORDER BY cas, datum;
+
+-- V ktoré dni a aký materiál mal väčší vydaj než zisk a na sklade bolo menej než 50 ton materiálu?
+
+((SELECT * FROM MATERIAL
+MINUS
+(SELECT * FROM MATERIAL WHERE (DATUM = '29.04.2017')))
+    MINUS
+    (SELECT * FROM MATERIAL WHERE (zisk > vydaj)))
+        MINUS
+        (SELECT * FROM MATERIAL WHERE (hmotnost_sklad > 50));
+		
+-- Objednávky pod 10 ton a 10 kilometrov.
+
+(SELECT meno_odb, adresa_odb, kontakt_odb
+ FROM OBJEDNAVKA 
+     JOIN ODBERATEL ON (ODBERATEL.id_odb = OBJEDNAVKA.id_odb)
+ WHERE (hmotnost_obj < 10))
+    INTERSECT
+(SELECT meno_odb, adresa_odb, kontakt_odb 
+ FROM DODANIE 
+    JOIN OBJEDNAVKA ON (OBJEDNAVKA.id_obj = DODANIE.id_obj)
+    JOIN ODBERATEL ON (ODBERATEL.id_odb = OBJEDNAVKA.id_odb)
+ WHERE (vzdialenost < 10));
+ 
+-- Priemený zisk materiálu za dni 01.07 až 06.07.
+
+SELECT material, round(AVG(zisk), 2) AS priemer
+FROM MATERIAL
+group by material;
+
+-- Koľko objednávok ma každy odberateľ?
+
+SELECT meno_odb, pocet_objednavok, adresa_odb, kontakt_odb
+FROM ODBERATEL
+    LEFT JOIN ((SELECT id_odb, count(id_obj) AS pocet_objednavok
+                FROM OBJEDNAVKA
+                group by id_odb) R1)
+    USING (id_odb)
+order by R1.pocet_objednavok DESC;
+
+-- Zamestnanci ktory nepracuju v lome ani v doprave.
+
+SELECT * FROM ZAMESTNANEC
+WHERE (id_zam NOT IN (SELECT id_zam FROM PRACOVNIK)) AND (id_zam NOT IN (SELECT id_zam FROM SOFER));
+
+SELECT * FROM 
+((SELECT id_zam  FROM ZAMESTNANEC)
+    MINUS
+((SELECT id_zam FROM PRACOVNIK)
+    UNION
+(SELECT id_zam FROM SOFER)))
+    JOIN ZAMESTNANEC USING (id_zam);
+
+SELECT id_zam, meno_zam, adresa_zam, kontakt_zam FROM ZAMESTNANEC
+    LEFT JOIN PRACOVNIK using (id_zam)
+    LEFT JOIN SOFER using (id_zam)
+WHERE (SKUPINA_VODICKEHO_PREUKAZU is null) and (POZICIA is null);
+
+-- Aké sú odpracované cašy pracovníkov podľa skupín.
+
+SELECT pozicia, COUNT(cas_sichta) AS pocet , SUM(cas_sichta) AS cas
+FROM SICHTA 
+    JOIN PRACOVNIK ON (SICHTA.id_zam = PRACOVNIK.id_zam)
+WHERE pozicia <> 'veduci lomu'
+GROUP BY pozicia
+HAVING SUM(cas_sichta) <> 0
+ORDER BY cas;
+
+-- Vytvor pohľad zamestnancov ktorý prišli do kontaktu s pieskom (s akým množstvom a kedy). Potom sa pozri ktorý pracovali s viac ako 10 tonami piesku v piatok (05.05.2017).
+
+CREATE VIEW zam_piesok AS
+((SELECT meno_zam, hmotnost, datum
+  FROM ((SELECT id_zam, SUM(hmotnost) AS hmotnost, datum
+         FROM  VOZIDLO 
+            JOIN (SELECT spz, SUM(hmotnost_vydaj) AS hmotnost, datum 
+                  FROM VYDAJ 
+                    JOIN DODANIE USING (id_vydaj)
+                  group by spz, datum) USING (spz)
+         group by id_zam, datum)) 
+  JOIN ZAMESTNANEC USING (id_zam))
+UNION
+(SELECT meno_zam, hmotnost, datum
+ FROM (SELECT id_zam, hmotnost_praca AS hmotnost, datum 
+       FROM SICHTA 
+         JOIN PRACA USING (id_praca)
+       WHERE typ_spracovanie = 'susenie') 
+    JOIN ZAMESTNANEC USING (id_zam)))
+order by datum, meno_zam;
+
+SELECT meno_zam, hmotnost
+FROM zam_piesok
+WHERE (datum = '05.05.2017') AND (hmotnost > 10);
+
+drop view zam_piesok;
+
+-- Pridaj vodičom pracujúcim v lomoch skupinu vodičského preukazu C1.
+
+INSERT INTO SOFER (id_zam, skupina_vodickeho_preukazu)
+SELECT id_zam, 'C1'
+FROM (SELECT id_zam FROM PRACOVNIK WHERE (pozicia = 'vodic'));
+
+rollback;
+
+-- Tann Loddon sa sťahuje k svojmu bratovi, ktorý je u nás takisto zamestnancom. Updatetujte Tannovu adresu.
+
+UPDATE ZAMESTNANEC
+SET  adresa_zam = 
+(SELECT adresa_zam
+FROM ZAMESTNANEC
+WHERE (meno_zam <> 'Tann Loddon') AND (meno_zam LIKE '% Loddon'))
+WHERE meno_zam = 'Tann Loddon';
+
+rollback;
+
+-- Bolo kúpené nové vozidlo na dopravu. Vymažte vozidlo ktoré sa nepoužíva s najmenšou nosnosťou.
+
+DELETE FROM VOZIDLO
+WHERE spz =
+(SELECT spz 
+ FROM (SELECT spz 
+    FROM VOZIDLO
+    WHERE (id_zam is null)
+    order by nosnost)
+ WHERE rownum = 1);
+
+rollback;
