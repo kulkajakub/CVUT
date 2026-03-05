@@ -1,4 +1,4 @@
-# Návod ke zprovoznění 1. části semestrální práce
+# Návod ke zprovoznění
 
 Spustení databáze a vložení dat.
 .../1 - NoSQL technologie >
