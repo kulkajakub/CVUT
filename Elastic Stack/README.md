@@ -1,5 +1,5 @@
 
-# 2. část semestrální práce - ELK Stack
+# ELK Stack
 
 ## Vydaná stavební povolení
 
