@@ -1,0 +1,197 @@
+### 01. Perzistence dat
+### 	Díky použiti volumes v docker-compose.yml se data nevymažou při ukončení kontejneru.
+
+cassandra@cqlsh>
+
+	SELECT * FROM sensors;
+
+
+### 02. Nalezni středu mezi sensory na stejné ulici.
+###		Díky sloupci 'all' nedostaneme varovaní a můžeme pracovat s všechny údaji najednou.     
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT AVG(latitude), AVG(longitude) FROM sensors WHERE all = 1 AND sensor_type IN ('Water', 'Weather') AND sensor_name = '63rd Street'; 
+
+
+### 03. Smažte oba sensory na '63rd Street' a nahraďte ho jedním s typem 'Water, Weather'.
+###		Vymazaní a vložení nového záznamu.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	DELETE FROM sensors WHERE all = 1 AND sensor_type IN ('Water', 'Weather') AND sensor_name = '63rd Street';
+	INSERT INTO sensors (all, sensor_type, sensor_name, latitude, longitude, location) values (1, 'Water, Weather', '63rd Street', 41.78278, -87.57204, {latitude: 41.78278, longitude: -87.57204});
+	SELECT * FROM sensors;
+
+
+### 04. Do 'sensors' přidejte aktuální stav baterií pro sensory z roku 2024. 
+###		Ukázka práce s různé definováními primárními klíčmi i když hledám stejné informace.
+###		Hledáni stavu baterii ve 'water' - těžký kvůli nastaveni, musím postupně procházet všechny hodnoty.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT beach_name, year, month, day, time, battery_life FROM water WHERE year = 2024 ORDER BY month DESC LIMIT 10;
+
+
+### 05. Hledáni stavu baterii ve 'weather'. 
+###		Lehký díky nastaveni, ale hledáni musim dělat osobitě pro každou stanici, protože nemůžu použít ORDER BY a WHERE IN společně.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT station_name, measurement_timestamp, battery_life FROM weather WHERE station_name = 'Foster' ORDER BY measurement_timestamp DESC LIMIT 3;
+	SELECT station_name, measurement_timestamp, battery_life FROM weather WHERE station_name = 'Oak Street' ORDER BY measurement_timestamp DESC LIMIT 3;
+	SELECT station_name, measurement_timestamp, battery_life FROM weather WHERE station_name = '63rd Street' ORDER BY measurement_timestamp DESC LIMIT 3;
+
+
+### 06. Vložení nalezených hodnot do senzoru.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	ALTER TABLE sensors ADD battery_life DOUBLE;
+	
+	BEGIN BATCH
+	UPDATE sensors SET battery_life = 7.7 WHERE all = 1 AND sensor_name = 'Ohio Street' AND sensor_type = 'Water';
+	UPDATE sensors SET battery_life = 15.2 WHERE all = 1 AND sensor_name = 'Foster' AND sensor_type = 'Weather';
+	UPDATE sensors SET battery_life = 11.9 WHERE all = 1 AND sensor_name = 'Oak Street' AND sensor_type = 'Weather';
+	UPDATE sensors SET battery_life = 12.2 WHERE all = 1 AND sensor_name = '63rd Street' AND sensor_type = 'Water, Weather';
+	APPLY BATCH;
+	
+	SELECT sensor_name, location, battery_life FROM sensors WHERE all = 1;
+
+
+### 07. Vytvořeni geo_location pro lokaci senzoru
+###     Ukázka prace s vlastními dátovými typmi a frozen. 
+
+cassandra@cqlsh:water_weather_sensors>
+
+	CREATE TYPE geo_coordinate ( latitude double, longitude double );
+	ALTER TABLE sensors ADD location FROZEN<geo_coordinate>;
+
+	BEGIN BATCH
+	UPDATE sensors SET location = {latitude: 41.714739, longitude: -87.527356} WHERE all = 1 AND sensor_name = 'Calumet' AND sensor_type = 'Water';
+	UPDATE sensors SET location = {latitude: 41.780992, longitude: -87.572619} WHERE all = 1 AND sensor_name = '63rd Street' AND sensor_type = 'Weather';
+	UPDATE sensors SET location = {latitude: 41.784561, longitude: -87.571453} WHERE all = 1 AND sensor_name = '63rd Street' AND sensor_type = 'Water';
+	UPDATE sensors SET location = {latitude: 41.901997, longitude: -87.622817} WHERE all = 1 AND sensor_name = 'Oak Street' AND sensor_type = 'Weather';
+	UPDATE sensors SET location = {latitude: 41.976464, longitude: -87.647525} WHERE all = 1 AND sensor_name = 'Foster' AND sensor_type = 'Weather';
+	UPDATE sensors SET location = {latitude: 41.969094, longitude: -87.638003} WHERE all = 1 AND sensor_name = 'Montrose' AND sensor_type = 'Water';
+	UPDATE sensors SET location = {latitude: 41.987675, longitude: -87.651008} WHERE all = 1 AND sensor_name = 'Osterman' AND sensor_type = 'Water';
+	UPDATE sensors SET location = {latitude: 41.894328, longitude: -87.613083} WHERE all = 1 AND sensor_name = 'Ohio Street' AND sensor_type = 'Water';
+	UPDATE sensors SET location = {latitude: 41.760147, longitude: -87.550081} WHERE all = 1 AND sensor_name = 'Rainbow' AND sensor_type = 'Water';
+	APPLY BATCH;
+
+	SELECT * FROM sensors;
+	
+	UPDATE sensors SET location.latitude = 42 WHERE all = 1 AND sensor_type = 'Water' AND sensor_name = 'Calumet';
+
+
+### 08. Naleznete informace o vlnách z 16.08.2016 o 13:00.
+###		Ve 'water' vyhledávaní záznamu podle let, měsíců, dnu a času je velice jednoduché.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT beach_name, wave_height, wave_period FROM water WHERE year = 2016 AND month = 8 AND day = 16 AND time = '1300';
+
+
+### 09. Naleznete informace o teplotě vody v roku 2016.
+
+cassandra@cqlsh:water_weather_sensors>
+	
+	SELECT AVG(water_temperature), MIN(water_temperature), MAX(water_temperature) FROM water WHERE year = 2016;
+
+
+### 10. Najdete kdy a kde mela voda zákal 8 a kdy víc než 100.
+### 	Pro hledaní přesně hodnoty podle hodnot mimo PRIMARY KEY, mužů použít INDEX, ale porovnávaní musím použit ALLOW FILTERING.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	CREATE INDEX ON water (turbidity);
+	SELECT beach_name, year, month, day, time, turbidity FROM water WHERE turbidity = 8;
+	SELECT beach_name, year, month, day, time, turbidity FROM water WHERE turbidity > 100 LIMIT 10 ALLOW FILTERING;
+
+
+### 11. Vypište údaje o dešti ze dne 26.03.2020 na stanici Oak Street.
+###		Tabulka weather byla vytvořena na hledaní podle stanic a casu, tudíž dotazy takých typu by měli bych jednoduché. 
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT measurement_timestamp, rain_intensity, interval_rain, total_rain FROM weather WHERE station_name = 'Oak Street' AND measurement_timestamp > '2020-03-26' AND measurement_timestamp < '2020-03-27';
+
+
+### 12. Jaká byla vlhkost a tlak v 19.09.2015 o 10:00?
+###		Mužů taky hledat cez různé stanice – ale bude to neefektivní, protože budu muset hledat cez různé primární klice co může zpomalit výkon
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT station_name, humidity, barometric_pressure FROM weather WHERE station_name IN ('Oak Street', 'Foster', '63rd Street') AND measurement_timestamp = '2015-09-18 10:00';
+
+
+### 13. Vytvořte funkci: Obecná zdánlivá teplota
+### 	Ukázka pro vytvorení vlastních funkci
+
+cassandra@cqlsh:water_weather_sensors>
+
+	CREATE OR REPLACE FUNCTION ga_temp (t DOUBLE, h INT, w DOUBLE) RETURNS NULL ON NULL INPUT RETURNS DOUBLE LANGUAGE java AS 'return t + 0.33 * (h / 100) * 6.105 * Math.exp((17.27 * t) / (t + 237.7)) - 0.7 * w - 4;';
+	SELECT station_name, measurement_timestamp, air_temperature, ga_temp (air_temperature, humidity, wind_speed) AS general_apparent_temperature FROM weather WHERE station_name = 'Foster' AND measurement_timestamp > '2015-09-19 08:00:00' AND measurement_timestamp < '2015-09-19 16:00:00';
+
+
+### 14. Vypište jednotlivé metrologické stanice a roky v kterých byli záznamy o vode.
+### 	DISTINCT - se da použít jenom s PARTITION KEY nebo STATIC - hezky na zjištění rozdělení primárních klíčů.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	SELECT DISTINCT station_name FROM weather;
+	SELECT DISTINCT year FROM water;
+	SELECT DISTINCT all FROM sensors;
+
+
+### 15. Bezpečnost - autentizace a autorizace
+### 	Vytvořeni role user pro vstup a přiděleni prav na prohledáváni.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	CREATE ROLE 'user' WITH PASSWORD = 'user' AND LOGIN = true;
+	GRANT SELECT ON KEYSPACE water_weather_sensors TO user;
+
+	LIST ROLES;
+	EXPAND ON;
+	SELECT * FROM system_auth.role_permissions;
+
+	EXIT
+
+
+root@cassandra1:/#
+
+	cqlsh
+	cqlsh -u user -p user
+	
+
+cassandra@cqlsh>
+
+	USE water_weather_sensors;
+	SELECT * FROM water LIMIT 10;
+	DROP TABLE water;
+
+### 16. Výpadek nodu.
+### 	Pomoci getendpoints si mohu dohledat na které nody obsahují data . Pak se napojím na nod v kterém se data nacházejí.
+
+cassandra@cqlsh:water_weather_sensors>
+
+	exit
+	nodetool getendpoints water_weather_sensors sensors 1 
+	nodetool status
+
+### 	V Docker Desktop zastavit cassandra1.
+###	
+
+.../1 - NoSQL technologie >
+
+	docker compose exec cassandra2 bash
+
+root@cassandra2:/#
+
+	clqsh
+	
+cassandra@cqlsh>
+
+	USE water_weather_sensors ;
+	SELECT * FROM weather LIMIT 10;
