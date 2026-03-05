@@ -1,4 +1,4 @@
-# 1. část semestrální práce - NoSQL databáze - Cassandra
+# NoSQL databáze - Cassandra
 
 ## Architektura
 
